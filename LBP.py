@@ -1,185 +1,90 @@
-"""Task 1: Spatial LBP extraction, recognition-rate evaluation and visualisation.
-
-This experiment uses the same dataset preparation, preprocessing, 80/20 split
-and fixed 1-Nearest Neighbour evaluator as HOG.py. Only the extracted feature
-set differs, which permits a fair HOG-versus-LBP comparison.
-"""
-
-import argparse
-import csv
-import hashlib
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 from skimage.feature import local_binary_pattern
-from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import Normalizer
 
 
 # ---------------------------------------------------------
-# Settings shared with HOG.py
+# Settings
 # ---------------------------------------------------------
 
-TRAIN_DIR = Path(
-    r"C:\Users\teeak\Desktop\Study\Y3S1"
-    r"\Mini Project (Assignment 2)\Training"
+TEST_DIR = Path(
+    r"C:\Users\wenji\Downloads\MP - A2"
+    r"\test_images"
 )
-ANNOTATION_FILE = TRAIN_DIR / "annotations.csv"
-TEST_DIR = TRAIN_DIR.parent / "Testing Image"
 
 IMAGE_SIZE = (64, 64)
-DISPLAY_COUNT = 10
+DISPLAY_COUNT = 20
+EXPECTED_LBP_LENGTH = 640
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".ppm", ".bmp"}
-VALIDATION_SIZE = 0.20
-RANDOM_SEED = 42
-
-# Best Spatial LBP settings selected using the validation set.
-LBP_METHOD = "uniform"
-LBP_POINTS = 8
-LBP_RADIUS = 1
-LBP_CELL_SIZE = 8
-LBP_HISTOGRAM_BINS = LBP_POINTS + 2
+WINDOW_NAME = "Task 1 - Spatial LBP Feature Extraction"
 
 
 # ---------------------------------------------------------
-# Dataset preparation
+# Spatial LBP feature extraction
 # ---------------------------------------------------------
 
-def read_annotations():
-    """Read labels and remove duplicate annotation rows by filename."""
-    labels_by_filename = {}
-    with ANNOTATION_FILE.open(newline="", encoding="utf-8-sig") as file:
-        for row in csv.DictReader(file):
-            filename = row["file_name"].strip()
-            category = int(float(row["category"]))
-
-            if not (TRAIN_DIR / filename).exists():
-                continue
-
-            labels_by_filename.setdefault(filename, category)
-
-    return labels_by_filename
-
-
-def image_hash(path):
-    """Return SHA-256 so exact lecturer-test copies can be excluded."""
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for block in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-# ---------------------------------------------------------
-# Image preprocessing shared with HOG.py
-# ---------------------------------------------------------
-
-def make_colour_mask(image):
-    """Create a mask for common red, blue and yellow sign colours."""
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    red = cv2.bitwise_or(
-        cv2.inRange(hsv, (0, 70, 40), (10, 255, 255)),
-        cv2.inRange(hsv, (170, 70, 40), (180, 255, 255))
-    )
-    blue = cv2.inRange(hsv, (90, 60, 35), (140, 255, 255))
-    yellow = cv2.inRange(hsv, (15, 70, 45), (40, 255, 255))
-    mask = cv2.bitwise_or(cv2.bitwise_or(red, blue), yellow)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-
-
-def extract_sign_region(image):
-    """Automatically crop the most likely traffic-sign region."""
-    mask = make_colour_mask(image)
-    contours, _ = cv2.findContours(
-        mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
-    candidates = []
-
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        x, y, width, height = cv2.boundingRect(contour)
-        aspect_ratio = width / max(height, 1)
-
-        if area >= 80 and 0.45 <= aspect_ratio <= 1.8:
-            candidates.append((area, x, y, width, height))
-
-    if not candidates:
-        return image
-
-    _, x, y, width, height = max(candidates)
-    padding = max(3, int(0.10 * max(width, height)))
-    x1, y1 = max(0, x - padding), max(0, y - padding)
-    x2 = min(image.shape[1], x + width + padding)
-    y2 = min(image.shape[0], y + height + padding)
-    cropped_sign = image[y1:y2, x1:x2]
-
-    return cropped_sign if cropped_sign.size else image
-
-
-# ---------------------------------------------------------
-# Task 1: Spatial LBP feature extraction
-# ---------------------------------------------------------
-
-def prepare_grayscale(image):
-    """Apply the shared crop, resize and grayscale preprocessing steps."""
+def extract_lbp(image, create_visualisation=False):
+    """Extract a 640-value Spatial LBP vector from one testing image."""
     if image is None or image.size == 0:
         raise ValueError("The supplied image is empty.")
 
-    cropped_sign = extract_sign_region(image)
-    resized = cv2.resize(
-        cropped_sign,
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(
+        gray,
         IMAGE_SIZE,
         interpolation=cv2.INTER_AREA
     )
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    return cropped_sign, gray
 
-
-def extract_lbp(gray, create_visualisation=False):
-    """Extract 8 x 8 spatial histograms of uniform LBP patterns."""
     lbp_image = local_binary_pattern(
         gray,
-        P=LBP_POINTS,
-        R=LBP_RADIUS,
-        method=LBP_METHOD
+        P=8,
+        R=1,
+        method="uniform"
     )
 
-    cells_per_side = IMAGE_SIZE[0] // LBP_CELL_SIZE
+    cells_per_side = IMAGE_SIZE[0] // 8
+
     cells = lbp_image.reshape(
         cells_per_side,
-        LBP_CELL_SIZE,
+        8,
         cells_per_side,
-        LBP_CELL_SIZE
+        8
     ).transpose(0, 2, 1, 3)
 
     histograms = np.stack(
         [
             (cells == pattern).sum(axis=(2, 3))
-            for pattern in range(LBP_HISTOGRAM_BINS)
+            for pattern in range(8 + 2)
         ],
         axis=-1
     ).astype(np.float32)
+
     histograms /= histograms.sum(axis=-1, keepdims=True) + 1e-7
     features = histograms.reshape(-1)
 
-    if create_visualisation:
-        visual = cv2.normalize(
-            lbp_image,
-            None,
-            0,
-            255,
-            cv2.NORM_MINMAX
-        ).astype(np.uint8)
-        return features, visual
+    if not create_visualisation:
+        return features.astype(np.float32)
 
-    return features
+    lbp_visual = cv2.normalize(
+        lbp_image,
+        None,
+        0,
+        255,
+        cv2.NORM_MINMAX
+    ).astype(np.uint8)
+
+    return features.astype(np.float32), gray, lbp_visual
+
+
+def valid_lbp_vector(features):
+    """Confirm that a complete Spatial LBP vector was produced."""
+    return (
+        features.ndim == 1
+        and len(features) == EXPECTED_LBP_LENGTH
+        and np.all(np.isfinite(features))
+    )
 
 
 # ---------------------------------------------------------
@@ -189,6 +94,7 @@ def extract_lbp(gray, create_visualisation=False):
 def add_title(image, title):
     panel = cv2.resize(image, (300, 300))
     title_area = np.zeros((45, 300, 3), dtype=np.uint8)
+
     cv2.putText(
         title_area,
         title,
@@ -199,33 +105,40 @@ def add_title(image, title):
         2,
         cv2.LINE_AA
     )
+
     return cv2.vconcat([title_area, panel])
 
 
 def create_display(
     image,
-    cropped_sign,
     gray,
     lbp_image,
     filename,
-    expected,
-    predicted
+    review_number,
+    total_reviews
 ):
+    original_panel = add_title(image, "Original")
+    grayscale_panel = add_title(
+        cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR),
+        "Grayscale"
+    )
+    lbp_panel = add_title(
+        cv2.cvtColor(lbp_image, cv2.COLOR_GRAY2BGR),
+        "Spatial LBP"
+    )
+
     panels = cv2.hconcat([
-        add_title(image, "Original"),
-        add_title(cropped_sign, "Cropped Sign"),
-        add_title(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), "Grayscale"),
-        add_title(cv2.cvtColor(lbp_image, cv2.COLOR_GRAY2BGR), "LBP Features")
+        original_panel,
+        grayscale_panel,
+        lbp_panel
     ])
 
-    header = np.zeros((70, panels.shape[1], 3), dtype=np.uint8)
+    header = np.zeros((85, panels.shape[1], 3), dtype=np.uint8)
+
     cv2.putText(
         header,
-        (
-            f"File: {filename} | Expected: {expected:03d} | "
-            f"Predicted: {predicted:03d}"
-        ),
-        (15, 28),
+        f"File: {filename} | Review: {review_number}/{total_reviews}",
+        (15, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.70,
         (255, 255, 255),
@@ -233,246 +146,200 @@ def create_display(
         cv2.LINE_AA
     )
 
-    correct = expected == predicted
     cv2.putText(
         header,
-        "CORRECT" if correct else "WRONG",
-        (panels.shape[1] - 145, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.70,
-        (0, 220, 0) if correct else (0, 0, 255),
-        2,
-        cv2.LINE_AA
-    )
-    cv2.putText(
-        header,
-        "Any key = next image | Esc = stop",
-        (15, 55),
+        "C = Correct extraction | X = Incorrect extraction | Esc = stop",
+        (15, 62),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
         (180, 220, 255),
         1,
         cv2.LINE_AA
     )
+
     return cv2.vconcat([header, panels])
 
 
-def terminal_status(correct):
-    text = "CORRECT" if correct else "WRONG"
-    if not sys.stdout.isatty():
-        return text
-    colour = "\033[92m" if correct else "\033[91m"
-    return f"{colour}{text}\033[0m"
-
-
 # ---------------------------------------------------------
-# Run the fixed Task 1 evaluation protocol
+# Run Task 1
 # ---------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--no-popup",
-        action="store_true",
-        help="Print results without opening the visualisation window."
-    )
-    options = parser.parse_args()
-
-    if not ANNOTATION_FILE.exists():
-        raise FileNotFoundError(
-            f"annotations.csv was not found: {ANNOTATION_FILE}"
-        )
-
-    labels_by_filename = read_annotations()
     test_paths = sorted(
-        path for path in TEST_DIR.rglob("*")
+        path
+        for path in TEST_DIR.rglob("*")
         if path.suffix.lower() in IMAGE_EXTENSIONS
     )
 
     if not test_paths:
-        raise FileNotFoundError(f"No testing images were found: {TEST_DIR}")
+        raise RuntimeError(
+            f"No valid testing images were found in: {TEST_DIR}"
+        )
 
-    test_hashes = {image_hash(path) for path in test_paths}
-    training_images = sorted([
-        (TRAIN_DIR / filename, category)
-        for filename, category in labels_by_filename.items()
-        if image_hash(TRAIN_DIR / filename) not in test_hashes
-    ], key=lambda item: item[0].name.lower())
-    removed_count = len(labels_by_filename) - len(training_images)
+    selected_indices = set(
+        np.linspace(
+            0,
+            len(test_paths) - 1,
+            num=min(DISPLAY_COUNT, len(test_paths)),
+            dtype=int
+        ).tolist()
+    )
 
-    training_grays = []
-    label_list = []
+    feature_list = []
+    failed_files = []
+    display_results = []
 
     print("=" * 68)
-    print("TASK 1: SPATIAL LBP EXTRACTION AND RECOGNITION RATE")
+    print("TASK 1: SPATIAL LBP FEATURE EXTRACTION AND VISUALISATION")
     print("=" * 68)
-    print(f"Unique training images           : {len(labels_by_filename)}")
-    print(f"Exact test-image matches removed : {removed_count}")
-    print(f"Clean training images            : {len(training_images)}")
-    print(f"Lecturer testing images          : {len(test_paths)}")
+    print(f"Testing images                   : {len(test_paths)}")
+    print(f"Images selected for visualisation: {len(selected_indices)}")
+    print(f"Standard image size              : {IMAGE_SIZE[0]} x {IMAGE_SIZE[1]}")
     print("LBP configuration                : P=8, R=1, uniform")
-    print("Spatial cells                    : 8 x 8 (8 x 8 pixels)")
-    print("Extracting LBP features...")
+    print("Spatial grid                     : 8 x 8 cells")
+    print("Cell size                        : 8 x 8 pixels")
+    print(f"Expected LBP features per image  : {EXPECTED_LBP_LENGTH}")
+    print("Classifier                       : Not used in Task 1")
+    print("\nExtracting Spatial LBP features from the testing dataset...")
 
-    for image_path, category in training_images:
+    for index, image_path in enumerate(test_paths):
         image = cv2.imread(str(image_path))
 
         if image is None:
-            print(f"Skipped unreadable image: {image_path.name}")
+            failed_files.append(
+                (image_path.name, "unreadable image")
+            )
             continue
 
-        _, gray = prepare_grayscale(image)
-        training_grays.append(gray)
-        label_list.append(category)
+        try:
+            if index in selected_indices:
+                features, gray, lbp_image = extract_lbp(
+                    image,
+                    create_visualisation=True
+                )
 
-    if not training_grays:
-        raise RuntimeError("No valid training images could be processed.")
+                display_results.append(
+                    (
+                        image,
+                        gray,
+                        lbp_image,
+                        image_path.name
+                    )
+                )
+            else:
+                features = extract_lbp(image)
 
-    X_all = np.vstack([
-        extract_lbp(gray)
-        for gray in training_grays
-    ])
-    y_all = np.asarray(label_list)
+            if not valid_lbp_vector(features):
+                raise ValueError(
+                    "invalid Spatial LBP feature vector"
+                )
 
-    print("\nLBP extraction completed.")
-    print(f"Images successfully processed   : {len(X_all)}")
-    print(f"LBP features per image          : {X_all.shape[1]}")
-    print(f"LBP feature matrix shape        : {X_all.shape}")
-    print(f"Label array shape               : {y_all.shape}")
+            feature_list.append(features)
 
-    X_train, X_validation, y_train, y_validation = train_test_split(
-        X_all,
-        y_all,
-        test_size=VALIDATION_SIZE,
-        random_state=RANDOM_SEED,
-        stratify=y_all
-    )
+        except (cv2.error, ValueError) as error:
+            failed_files.append(
+                (image_path.name, str(error))
+            )
 
-    print("\nFixed evaluation protocol")
-    print("Evaluator                        : 1-Nearest Neighbour")
-    print("Distance                         : Euclidean")
-    print("Feature normalisation            : L2")
-    print(f"Training samples                 : {len(X_train)}")
-    print(f"Validation samples               : {len(X_validation)}")
-
-    evaluator = make_pipeline(
-        Normalizer(norm="l2"),
-        KNeighborsClassifier(
-            n_neighbors=1,
-            metric="euclidean",
-            n_jobs=-1
+    if not feature_list:
+        raise RuntimeError(
+            "No valid Spatial LBP features were extracted."
         )
-    )
-    evaluator.fit(X_train, y_train)
-    validation_predictions = evaluator.predict(X_validation)
-    validation_correct = int(np.sum(validation_predictions == y_validation))
-    validation_total = len(y_validation)
-    validation_rate = validation_correct / validation_total
 
-    test_grays = []
-    test_labels = []
-    valid_test_paths = []
-
-    for image_path in test_paths:
-        image = cv2.imread(str(image_path))
-
-        if image is None:
-            print(f"Skipped unreadable testing image: {image_path.name}")
-            continue
-
-        _, gray = prepare_grayscale(image)
-        test_grays.append(gray)
-        test_labels.append(int(image_path.name.split("_")[0]))
-        valid_test_paths.append(image_path)
-
-    if not test_grays:
-        raise RuntimeError("No valid lecturer testing images could be processed.")
-
-    X_test = np.vstack([
-        extract_lbp(gray)
-        for gray in test_grays
-    ])
-    y_test = np.asarray(test_labels)
-
-    evaluator = make_pipeline(
-        Normalizer(norm="l2"),
-        KNeighborsClassifier(
-            n_neighbors=1,
-            metric="euclidean",
-            n_jobs=-1
-        )
-    )
-    evaluator.fit(X_all, y_all)
-    test_predictions = evaluator.predict(X_test)
-    test_correct = int(np.sum(test_predictions == y_test))
-    test_total = len(y_test)
-    test_rate = test_correct / test_total
+    X = np.vstack(feature_list)
+    technical_rate = len(X) / len(test_paths)
 
     print("\n" + "=" * 68)
-    print("LECTURER TEST PREDICTIONS")
+    print("SPATIAL LBP FEATURE EXTRACTION RESULTS")
     print("=" * 68)
-    for number, (path, expected, predicted) in enumerate(
-        zip(valid_test_paths, y_test, test_predictions),
+    print(f"Successfully extracted images    : {len(X)}/{len(test_paths)}")
+    print(f"Technical processing rate        : {technical_rate * 100:.2f}%")
+    print(f"LBP features per image           : {X.shape[1]}")
+    print(f"LBP feature matrix shape         : {X.shape}")
+    print(f"Visualisation results            : {len(display_results)}")
+    print("Classifier                       : Not used")
+
+    if failed_files:
+        print("\nFailed files:")
+
+        for filename, reason in failed_files:
+            print(f"- {filename}: {reason}")
+
+    print("\nVisual review")
+    print("C = Correct feature extraction")
+    print("X = Incorrect feature extraction")
+    print("Esc = Stop review")
+
+    correct_count = 0
+    incorrect_count = 0
+    reviewed_results = []
+
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+
+    total_reviews = len(display_results)
+
+    for review_number, result in enumerate(
+        display_results,
         start=1
     ):
-        correct = expected == predicted
-        print(
-            f"{number:>3}. {path.name:<22} "
-            f"expected={expected:03d} predicted={predicted:03d} "
-            f"{terminal_status(correct)}"
-        )
+        image, gray, lbp_image, filename = result
 
-    print("\n" + "=" * 68)
-    print("LBP RECOGNITION-RATE RESULTS")
-    print("=" * 68)
-    print(
-        f"Validation recognition rate     : {validation_correct}/"
-        f"{validation_total} = {validation_rate * 100:.2f}%"
-    )
-    print(
-        f"Lecturer test recognition rate  : {test_correct}/"
-        f"{test_total} = {test_rate * 100:.2f}%"
-    )
-    print("LBP configuration                : P8-R1-C8")
-    print("Fixed evaluator                  : 1-Nearest Neighbour")
-    print(f"Visualisation results            : {min(DISPLAY_COUNT, test_total)}")
-
-    if options.no_popup:
-        return
-
-    print("\nPress any key for the next image.")
-    print("Press Esc to stop.")
-    cv2.namedWindow("Task 1 - LBP Feature Extraction", cv2.WINDOW_NORMAL)
-    indices = np.linspace(
-        0,
-        test_total - 1,
-        num=min(DISPLAY_COUNT, test_total),
-        dtype=int
-    )
-
-    for index in indices:
-        image_path = valid_test_paths[index]
-        image = cv2.imread(str(image_path))
-        cropped_sign, gray = prepare_grayscale(image)
-        _, lbp_image = extract_lbp(
-            gray,
-            create_visualisation=True
-        )
         display = create_display(
             image,
-            cropped_sign,
             gray,
             lbp_image,
-            image_path.name,
-            int(y_test[index]),
-            int(test_predictions[index])
+            filename,
+            review_number,
+            total_reviews
         )
-        cv2.imshow("Task 1 - LBP Feature Extraction", display)
 
-        if cv2.waitKey(0) & 0xFF == 27:
+        cv2.imshow(WINDOW_NAME, display)
+
+        while True:
+            key = cv2.waitKey(0) & 0xFF
+
+            if key in (ord("c"), ord("C")):
+                correct_count += 1
+                reviewed_results.append(
+                    (filename, "Correct")
+                )
+                break
+
+            if key in (ord("x"), ord("X")):
+                incorrect_count += 1
+                reviewed_results.append(
+                    (filename, "Incorrect")
+                )
+                break
+
+            if key == 27:
+                cv2.destroyAllWindows()
+                break
+
+        if key == 27:
             break
 
     cv2.destroyAllWindows()
+
+    reviewed_total = correct_count + incorrect_count
+
+    print("\n" + "=" * 68)
+    print("VISUAL REVIEW RESULTS")
+    print("=" * 68)
+
+    for filename, result in reviewed_results:
+        print(f"{filename:<28} {result}")
+
+    print(f"\nImages reviewed                  : {reviewed_total}")
+    print(f"Correct feature extraction       : {correct_count}")
+    print(f"Incorrect feature extraction     : {incorrect_count}")
+
+    if reviewed_total > 0:
+        review_rate = correct_count / reviewed_total
+        print(
+            f"Visual review success rate       : "
+            f"{review_rate * 100:.2f}%"
+        )
 
 
 if __name__ == "__main__":
