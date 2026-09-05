@@ -22,6 +22,61 @@ WINDOW_NAME = "Task 1 - Spatial LBP Feature Extraction"
 
 
 # ---------------------------------------------------------
+# Automatic traffic-sign region extraction
+# ---------------------------------------------------------
+
+def make_colour_mask(image):
+    """Detect common red, blue and yellow traffic-sign colours."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    red = cv2.bitwise_or(
+        cv2.inRange(hsv, (0, 70, 40), (10, 255, 255)),
+        cv2.inRange(hsv, (170, 70, 40), (180, 255, 255))
+    )
+    blue = cv2.inRange(hsv, (90, 60, 35), (140, 255, 255))
+    yellow = cv2.inRange(hsv, (15, 70, 45), (40, 255, 255))
+    mask = cv2.bitwise_or(cv2.bitwise_or(red, blue), yellow)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+
+def extract_sign_region(image):
+    """Automatically crop the most likely sign, or return the full image."""
+    mask = make_colour_mask(image)
+    contours, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    candidates = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        x, y, width, height = cv2.boundingRect(contour)
+        aspect_ratio = width / max(height, 1)
+
+        if area >= 80 and 0.45 <= aspect_ratio <= 1.8:
+            candidates.append((area, x, y, width, height))
+
+    if not candidates:
+        return image
+
+    _, x, y, width, height = max(candidates)
+    padding = max(3, int(0.10 * max(width, height)))
+
+    x1 = max(0, x - padding)
+    y1 = max(0, y - padding)
+    x2 = min(image.shape[1], x + width + padding)
+    y2 = min(image.shape[0], y + height + padding)
+
+    cropped_sign = image[y1:y2, x1:x2]
+
+    return cropped_sign if cropped_sign.size else image
+
+
+# ---------------------------------------------------------
 # Spatial LBP feature extraction
 # ---------------------------------------------------------
 
@@ -111,6 +166,7 @@ def add_title(image, title):
 
 def create_display(
     image,
+    cropped_sign,
     gray,
     lbp_image,
     filename,
@@ -118,6 +174,7 @@ def create_display(
     total_reviews
 ):
     original_panel = add_title(image, "Original")
+    cropped_panel = add_title(cropped_sign, "Extracted Sign")
     grayscale_panel = add_title(
         cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR),
         "Grayscale"
@@ -129,6 +186,7 @@ def create_display(
 
     panels = cv2.hconcat([
         original_panel,
+        cropped_panel,
         grayscale_panel,
         lbp_panel
     ])
@@ -199,6 +257,7 @@ def main():
     print("Spatial grid                     : 8 x 8 cells")
     print("Cell size                        : 8 x 8 pixels")
     print(f"Expected LBP features per image  : {EXPECTED_LBP_LENGTH}")
+    print("Region extraction                : Automatic colour/contour method")
     print("Classifier                       : Not used in Task 1")
     print("\nExtracting Spatial LBP features from the testing dataset...")
 
@@ -212,22 +271,25 @@ def main():
             continue
 
         try:
+            cropped_sign = extract_sign_region(image)
+
             if index in selected_indices:
                 features, gray, lbp_image = extract_lbp(
-                    image,
+                    cropped_sign,
                     create_visualisation=True
                 )
 
                 display_results.append(
                     (
                         image,
+                        cropped_sign,
                         gray,
                         lbp_image,
                         image_path.name
                     )
                 )
             else:
-                features = extract_lbp(image)
+                features = extract_lbp(cropped_sign)
 
             if not valid_lbp_vector(features):
                 raise ValueError(
@@ -282,10 +344,11 @@ def main():
         display_results,
         start=1
     ):
-        image, gray, lbp_image, filename = result
+        image, cropped_sign, gray, lbp_image, filename = result
 
         display = create_display(
             image,
+            cropped_sign,
             gray,
             lbp_image,
             filename,
