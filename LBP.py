@@ -28,13 +28,7 @@ IMAGE_SIZE = (64, 64)
 EXPECTED_LBP_LENGTH = 640
 VALIDATION_SIZE = 0.20
 RANDOM_SEED = 42
-
-DISPLAY_ALLOCATION = {
-    "Training": 4,
-    "Validation": 3,
-    "Testing": 3
-}
-
+DISPLAY_ALLOCATION = {"Training": 4, "Validation": 3, "Testing": 3}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".ppm", ".bmp"}
 WINDOW_NAME = "Task 1 - Spatial LBP Feature Extraction"
 
@@ -92,11 +86,7 @@ def prepare_partitions():
         )
 
     labels_by_filename, raw_row_count = read_annotations()
-
-    test_hashes = {
-        image_hash(path)
-        for path in test_paths
-    }
+    test_hashes = {image_hash(path) for path in test_paths}
 
     clean_records = sorted(
         (
@@ -165,23 +155,10 @@ def make_colour_mask(image):
         cv2.inRange(hsv, (0, 70, 40), (10, 255, 255)),
         cv2.inRange(hsv, (170, 70, 40), (180, 255, 255))
     )
+    blue = cv2.inRange(hsv, (90, 60, 35), (140, 255, 255))
+    yellow = cv2.inRange(hsv, (15, 70, 45), (40, 255, 255))
 
-    blue = cv2.inRange(
-        hsv,
-        (90, 60, 35),
-        (140, 255, 255)
-    )
-
-    yellow = cv2.inRange(
-        hsv,
-        (15, 70, 45),
-        (40, 255, 255)
-    )
-
-    mask = cv2.bitwise_or(
-        cv2.bitwise_or(red, blue),
-        yellow
-    )
+    mask = cv2.bitwise_or(cv2.bitwise_or(red, blue), yellow)
 
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
@@ -214,19 +191,13 @@ def extract_sign_region(image):
         aspect_ratio = width / max(height, 1)
 
         if area >= 80 and 0.45 <= aspect_ratio <= 1.8:
-            candidates.append(
-                (area, x, y, width, height)
-            )
+            candidates.append((area, x, y, width, height))
 
     if not candidates:
         return image
 
     _, x, y, width, height = max(candidates)
-
-    padding = max(
-        3,
-        int(0.10 * max(width, height))
-    )
+    padding = max(3, int(0.10 * max(width, height)))
 
     x1 = max(0, x - padding)
     y1 = max(0, y - padding)
@@ -234,7 +205,6 @@ def extract_sign_region(image):
     y2 = min(image.shape[0], y + height + padding)
 
     cropped_sign = image[y1:y2, x1:x2]
-
     return cropped_sign if cropped_sign.size else image
 
 
@@ -247,11 +217,7 @@ def extract_lbp(image, create_visualisation=False):
     if image is None or image.size == 0:
         raise ValueError("The supplied image is empty.")
 
-    gray = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2GRAY
-    )
-
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(
         gray,
         IMAGE_SIZE,
@@ -282,11 +248,7 @@ def extract_lbp(image, create_visualisation=False):
         axis=-1
     ).astype(np.float32)
 
-    histograms /= (
-        histograms.sum(axis=-1, keepdims=True)
-        + 1e-7
-    )
-
+    histograms /= histograms.sum(axis=-1, keepdims=True) + 1e-7
     features = histograms.reshape(-1)
 
     if not create_visualisation:
@@ -300,11 +262,7 @@ def extract_lbp(image, create_visualisation=False):
         cv2.NORM_MINMAX
     ).astype(np.uint8)
 
-    return (
-        features.astype(np.float32),
-        gray,
-        lbp_visual
-    )
+    return features.astype(np.float32), gray, lbp_visual
 
 
 def valid_lbp_vector(features):
@@ -322,10 +280,7 @@ def valid_lbp_vector(features):
 
 def add_title(image, title):
     panel = cv2.resize(image, (300, 300))
-    title_area = np.zeros(
-        (45, 300, 3),
-        dtype=np.uint8
-    )
+    title_area = np.zeros((45, 300, 3), dtype=np.uint8)
 
     cv2.putText(
         title_area,
@@ -338,9 +293,7 @@ def add_title(image, title):
         cv2.LINE_AA
     )
 
-    return cv2.vconcat(
-        [title_area, panel]
-    )
+    return cv2.vconcat([title_area, panel])
 
 
 def create_display(
@@ -355,29 +308,14 @@ def create_display(
     total_reviews
 ):
     panels = cv2.hconcat([
+        add_title(image, "Original"),
+        add_title(cropped_sign, "Extracted Sign"),
         add_title(
-            image,
-            "Original"
-        ),
-
-        add_title(
-            cropped_sign,
-            "Extracted Sign"
-        ),
-
-        add_title(
-            cv2.cvtColor(
-                gray,
-                cv2.COLOR_GRAY2BGR
-            ),
+            cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR),
             "Grayscale"
         ),
-
         add_title(
-            cv2.cvtColor(
-                lbp_image,
-                cv2.COLOR_GRAY2BGR
-            ),
+            cv2.cvtColor(lbp_image, cv2.COLOR_GRAY2BGR),
             "Spatial LBP"
         )
     ])
@@ -405,11 +343,7 @@ def create_display(
 
     cv2.putText(
         header,
-        (
-            "C = Correct extraction | "
-            "X = Incorrect extraction | "
-            "Esc = stop"
-        ),
+        "C = Correct extraction | X = Incorrect extraction | Esc = stop",
         (15, 62),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
@@ -418,20 +352,14 @@ def create_display(
         cv2.LINE_AA
     )
 
-    return cv2.vconcat(
-        [header, panels]
-    )
+    return cv2.vconcat([header, panels])
 
 
 # ---------------------------------------------------------
 # Partition processing
 # ---------------------------------------------------------
 
-def process_partition(
-    partition,
-    records,
-    display_count
-):
+def process_partition(partition, records, display_count):
     """Extract LBP features from all images in one partition."""
     selected_indices = representative_indices(
         len(records),
@@ -461,22 +389,17 @@ def process_partition(
                     create_visualisation=True
                 )
 
-                display_results.append(
-                    (
-                        image,
-                        cropped_sign,
-                        gray,
-                        lbp_image,
-                        image_path.name,
-                        category,
-                        partition
-                    )
-                )
-
+                display_results.append((
+                    image,
+                    cropped_sign,
+                    gray,
+                    lbp_image,
+                    image_path.name,
+                    category,
+                    partition
+                ))
             else:
-                features = extract_lbp(
-                    cropped_sign
-                )
+                features = extract_lbp(cropped_sign)
 
             if not valid_lbp_vector(features):
                 raise ValueError(
@@ -519,59 +442,19 @@ def main():
     )
     print("=" * 72)
 
-    print(
-        f"Raw annotation rows              : "
-        f"{metadata['raw_rows']}"
-    )
-    print(
-        f"Unique annotated images          : "
-        f"{metadata['unique_images']}"
-    )
-    print(
-        f"Exact testing overlaps removed   : "
-        f"{metadata['overlaps_removed']}"
-    )
-    print(
-        f"Clean images before split        : "
-        f"{metadata['clean_images']}"
-    )
-    print(
-        f"Training images                  : "
-        f"{len(partitions['Training'])}"
-    )
-    print(
-        f"Validation images                : "
-        f"{len(partitions['Validation'])}"
-    )
-    print(
-        f"Lecturer testing images          : "
-        f"{len(partitions['Testing'])}"
-    )
-
-    print(
-        f"Standard image size              : "
-        f"{IMAGE_SIZE[0]} x {IMAGE_SIZE[1]}"
-    )
-    print(
-        "LBP configuration                : "
-        "P=8, R=1, uniform"
-    )
-    print(
-        "Spatial grid                     : "
-        "8 x 8 cells"
-    )
-    print(
-        "Cell size                        : "
-        "8 x 8 pixels"
-    )
-    print(
-        f"Expected LBP features per image  : "
-        f"{EXPECTED_LBP_LENGTH}"
-    )
-    print(
-        "Region extraction                : "
-        "Automatic colour/contour method"
-    )
+    print(f"Raw annotation rows              : {metadata['raw_rows']}")
+    print(f"Unique annotated images          : {metadata['unique_images']}")
+    print(f"Exact testing overlaps removed   : {metadata['overlaps_removed']}")
+    print(f"Clean images before split        : {metadata['clean_images']}")
+    print(f"Training images                  : {len(partitions['Training'])}")
+    print(f"Validation images                : {len(partitions['Validation'])}")
+    print(f"Lecturer testing images          : {len(partitions['Testing'])}")
+    print(f"Standard image size              : {IMAGE_SIZE[0]} x {IMAGE_SIZE[1]}")
+    print("LBP configuration                : P=8, R=1, uniform")
+    print("Spatial grid                     : 8 x 8 cells")
+    print("Cell size                        : 8 x 8 pixels")
+    print(f"Expected LBP features per image  : {EXPECTED_LBP_LENGTH}")
+    print("Region extraction                : Automatic colour/contour method")
 
     results = {
         name: process_partition(
@@ -602,22 +485,11 @@ def main():
             f"  Technical processing rate      : "
             f"{rate * 100:.2f}%"
         )
-        print(
-            f"  Feature matrix shape           : "
-            f"{result['X'].shape}"
-        )
-        print(
-            f"  Label array shape              : "
-            f"{result['y'].shape}"
-        )
-        print(
-            f"  Visualisation samples          : "
-            f"{len(result['displays'])}"
-        )
+        print(f"  Feature matrix shape           : {result['X'].shape}")
+        print(f"  Label array shape              : {result['y'].shape}")
+        print(f"  Visualisation samples          : {len(result['displays'])}")
 
-        all_displays.extend(
-            result["displays"]
-        )
+        all_displays.extend(result["displays"])
 
         all_failures.extend(
             (name, filename, reason)
@@ -656,9 +528,7 @@ def main():
         print("\nFailed files:")
 
         for name, filename, reason in all_failures:
-            print(
-                f"- [{name}] {filename}: {reason}"
-            )
+            print(f"- [{name}] {filename}: {reason}")
 
     # -----------------------------------------------------
     # Manual visual review
@@ -706,16 +576,14 @@ def main():
             total_reviews
         )
 
-        cv2.imshow(
-            WINDOW_NAME,
-            display
-        )
+        cv2.imshow(WINDOW_NAME, display)
 
         while True:
             key = cv2.waitKey(0) & 0xFF
 
             if key in (ord("c"), ord("C")):
                 correct_count += 1
+
                 reviewed_results.append(
                     (
                         partition,
@@ -728,6 +596,7 @@ def main():
 
             if key in (ord("x"), ord("X")):
                 incorrect_count += 1
+
                 reviewed_results.append(
                     (
                         partition,
@@ -747,22 +616,13 @@ def main():
 
     cv2.destroyAllWindows()
 
-    reviewed_total = (
-        correct_count
-        + incorrect_count
-    )
+    reviewed_total = correct_count + incorrect_count
 
     print("\n" + "=" * 72)
     print("VISUAL REVIEW RESULTS")
     print("=" * 72)
 
-    for (
-        partition,
-        filename,
-        category,
-        result
-    ) in reviewed_results:
-
+    for partition, filename, category, result in reviewed_results:
         print(
             f"{partition:<11} "
             f"{filename:<24} "
@@ -770,24 +630,12 @@ def main():
             f"{result}"
         )
 
-    print(
-        f"\nImages reviewed                  : "
-        f"{reviewed_total}"
-    )
-    print(
-        f"Correct feature extraction       : "
-        f"{correct_count}"
-    )
-    print(
-        f"Incorrect feature extraction     : "
-        f"{incorrect_count}"
-    )
+    print(f"\nImages reviewed                  : {reviewed_total}")
+    print(f"Correct feature extraction       : {correct_count}")
+    print(f"Incorrect feature extraction     : {incorrect_count}")
 
     if reviewed_total > 0:
-        review_rate = (
-            correct_count
-            / reviewed_total
-        )
+        review_rate = correct_count / reviewed_total
 
         print(
             f"Visual review success rate       : "
